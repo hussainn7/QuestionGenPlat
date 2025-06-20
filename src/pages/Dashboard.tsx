@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
@@ -29,27 +28,27 @@ const Dashboard: React.FC = () => {
   const navigate = useNavigate();
 
   // Mock previous jobs data
-  const [previousJobs] = useState<Job[]>([
-    {
-      id: '1',
-      filename: 'sample-document.pdf',
-      status: 'completed',
-      timestamp: new Date('2024-06-10T10:30:00'),
-      questionCount: 850
-    },
-    {
-      id: '2',
-      filename: 'training-manual.docx',
-      status: 'in-progress',
-      timestamp: new Date('2024-06-11T14:15:00')
-    },
-    {
-      id: '3',
-      filename: 'course-content.pdf',
-      status: 'pending',
-      timestamp: new Date('2024-06-12T09:00:00')
-    }
-  ]);
+  // const [previousJobs] = useState<Job[]>([
+  //   {
+  //     id: '1',
+  //     filename: 'sample-document.pdf',
+  //     status: 'completed',
+  //     timestamp: new Date('2024-06-10T10:30:00'),
+  //     questionCount: 850
+  //   },
+  //   {
+  //     id: '2',
+  //     filename: 'training-manual.docx',
+  //     status: 'in-progress',
+  //     timestamp: new Date('2024-06-11T14:15:00')
+  //   },
+  //   {
+  //     id: '3',
+  //     filename: 'course-content.pdf',
+  //     status: 'pending',
+  //     timestamp: new Date('2024-06-12T09:00:00')
+  //   }
+  // ]);
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
@@ -65,19 +64,42 @@ const Dashboard: React.FC = () => {
     }
 
     setIsGenerating(true);
-    
-    // Simulate API call delay
-    setTimeout(() => {
+
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('question_language', questionLanguage);
+      formData.append('explanation_language', explanationLanguage);
+      formData.append('number_of_questions', numberOfQuestions);
+      formData.append('output_format', outputFormat);
+
+      const response = await fetch(import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
       navigate('/processing', {
         state: {
           filename: selectedFile.name,
           questionLanguage,
           explanationLanguage,
           numberOfQuestions,
-          outputFormat
+          outputFormat,
+          jobId: data.job_id
         }
       });
-    }, 1000);
+    } catch (error) {
+      console.error(error);
+      alert('Failed to start generation. Please try again.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const getStatusBadge = (status: Job['status']) => {
@@ -163,6 +185,8 @@ const Dashboard: React.FC = () => {
                         <SelectItem value="ja">Japanese</SelectItem>
                         <SelectItem value="es">Spanish</SelectItem>
                         <SelectItem value="fr">French</SelectItem>
+                        <SelectItem value="de">German</SelectItem>
+                        <SelectItem value="zh">Chinese</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -181,6 +205,8 @@ const Dashboard: React.FC = () => {
                         <SelectItem value="ja">Japanese</SelectItem>
                         <SelectItem value="es">Spanish</SelectItem>
                         <SelectItem value="fr">French</SelectItem>
+                        <SelectItem value="de">German</SelectItem>
+                        <SelectItem value="zh">Chinese</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -227,7 +253,7 @@ const Dashboard: React.FC = () => {
           </div>
 
           {/* Previous Jobs */}
-          <div>
+          {/* <div>
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
@@ -279,7 +305,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </CardContent>
             </Card>
-          </div>
+          </div> */}
         </div>
       </div>
     </div>

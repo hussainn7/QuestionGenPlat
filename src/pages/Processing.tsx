@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Navigation from '../components/Navigation';
@@ -13,6 +12,7 @@ interface ProcessingState {
   explanationLanguage: string;
   numberOfQuestions: string;
   outputFormat: string;
+  jobId: string;
 }
 
 interface ProcessStep {
@@ -30,8 +30,9 @@ const Processing: React.FC = () => {
   
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
-  const [estimatedTime, setEstimatedTime] = useState(180); // 3 minutes
+  const [estimatedTime, setEstimatedTime] = useState(60);
   const [logs, setLogs] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const steps: ProcessStep[] = [
     {
@@ -71,49 +72,131 @@ const Processing: React.FC = () => {
     }
   ];
 
-  useEffect(() => {
-    if (!state) {
+  const pollStatus = async () => {
+    if (!state?.jobId) {
+      console.error('Job ID not found in state');
       navigate('/dashboard');
       return;
     }
 
-    const simulateProgress = () => {
-      const intervals = [
-        { step: 0, time: 2000, progress: 20 },
-        { step: 1, time: 3000, progress: 40 },
-        { step: 2, time: 4000, progress: 60 },
-        { step: 3, time: 5000, progress: 80 },
-        { step: 4, time: 2000, progress: 100 }
-      ];
+    try {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/jobs/${state.jobId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch job status');
+      }
+      const data = await response.json();
+      
+      // Update logs with detailed status information
+      let statusLog = `Status: ${data.status || 'unknown'} - ${data.progress}% complete`;
+      if (data.step) {
+        statusLog += ` - Step ${data.step}`;
+      }
+      if (data.logs && data.logs.length > 0) {
+        statusLog += ` - Last log: ${data.logs[data.logs.length - 1]}`;
+      }
+      setLogs((prev) => [...prev, statusLog]);
+      
+      // Check if job is completed or errored
+      if (data.status === 'completed' || data.status === 'error') {
+        // Stop polling
+        if (data.status === 'error') {
+          setError(data.error || 'An error occurred');
+          setLogs((prev) => [...prev, data.error || 'An error occurred']);
+        } else {
+          // Navigate to results page
+          navigate('/results', {
+            state: {
+              ...state,
+              jobId: state.jobId,
+              questionsGenerated: data.questions_generated || 0,
+              topicsDetected: data.topics_detected || 0,
+              questionsPreview: data.questions_preview || []
+            }
+          });
+        }
+        return;
+      }
+      
+      // Update progress and current step
+      setProgress(data.progress || 0);
+      setCurrentStep(data.step || 0);
+      setEstimatedTime(data.eta || 0);
+      
+      // Set timeout for next poll
+      const timeoutId = setTimeout(() => pollStatus(), 2000);
+      return () => {
+        // Cleanup any pending timeouts
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      };
+    } catch (error) {
+      // Add retry logic
+      const retryCount = localStorage.getItem('retryCount') || '0';
+      const currentRetry = parseInt(retryCount) + 1;
+      localStorage.setItem('retryCount', currentRetry.toString());
+      
+      if (currentRetry >= 5) {
+        setError(error instanceof Error ? error.message : 'An error occurred');
+        setLogs((prev) => [...prev, error instanceof Error ? error.message : 'An error occurred']);
+        localStorage.removeItem('retryCount');
+        return;
+      }
+      
+      // Exponential backoff
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, currentRetry) * 1000));
+      
+      // Continue polling
+      const timeoutId = setTimeout(() => pollStatus(), 2000);
+      return () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      };
+    }
+  };
 
-      let totalTime = 0;
-      intervals.forEach(({ step, time, progress: stepProgress }, index) => {
-        totalTime += time;
-        setTimeout(() => {
-          setCurrentStep(step + 1);
-          setProgress(stepProgress);
-          setEstimatedTime(prev => Math.max(0, prev - time / 1000));
-          
-          const stepName = steps[step].title;
-          setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${stepName} ✓`]);
-          
-          if (index === intervals.length - 1) {
-            setTimeout(() => {
-              navigate('/results', {
-                state: {
-                  ...state,
-                  questionsGenerated: parseInt(state.numberOfQuestions) - Math.floor(Math.random() * 100),
-                  topicsDetected: Math.floor(Math.random() * 20) + 5
-                }
-              });
-            }, 1000);
-          }
-        }, totalTime);
-      });
+  useEffect(() => {
+    // Start polling
+    pollStatus();
+
+    // Return cleanup function
+    return () => {
+      // No timeoutId to clean up since it's handled in pollStatus
     };
+  }, [navigate, state, setError, setLogs, setCurrentStep, setProgress, setEstimatedTime]);
 
-    simulateProgress();
-  }, [state, navigate]);
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <div className="max-w-4xl mx-auto py-12 px-4">
+          <div className="bg-red-50 p-6 rounded-lg shadow-md">
+            <h2 className="text-2xl font-bold text-red-900 mb-4">Error Occurred</h2>
+            <p className="text-red-700">{error}</p>
+            <div className="mt-4">
+              <p className="text-gray-600">Please try again or check the console for more details.</p>
+              <div className="mt-4 flex space-x-4">
+                <Button className="mt-4" onClick={() => navigate('/dashboard')}>
+                  Back to Dashboard
+                </Button>
+                <Button 
+                  className="mt-4 bg-blue-500 hover:bg-blue-600 text-white"
+                  onClick={() => {
+                    setError(null);
+                    setLogs([]);
+                    pollStatus();
+                  }}
+                >
+                  Retry
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleCancel = () => {
     navigate('/dashboard');

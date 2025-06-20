@@ -1,5 +1,4 @@
-
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
 import { Button } from '@/components/ui/button';
@@ -16,13 +15,20 @@ interface ResultsState {
   outputFormat: string;
   questionsGenerated: number;
   topicsDetected: number;
+  questionsPreview: any[];
+  jobId: string;
 }
 
 interface Question {
   id: number;
   question: string;
-  options: string[];
-  correctAnswer: string;
+  options: {
+    A: string;
+    B: string;
+    C: string;
+    D: string;
+  };
+  correct_answer: string; // Changed to string (A/B/C/D)
   explanation: string;
   topic: string;
 }
@@ -31,42 +37,58 @@ const Results: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const state = location.state as ResultsState;
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock generated questions for preview
-  const sampleQuestions: Question[] = [
-    {
-      id: 1,
-      question: "What is the primary function of mitochondria in cells?",
-      options: ["Protein synthesis", "Energy production", "DNA storage", "Waste removal"],
-      correctAnswer: "Energy production",
-      explanation: "Mitochondria are known as the powerhouses of the cell because they produce ATP, which is the main energy currency of cellular processes.",
-      topic: "Cell Biology"
-    },
-    {
-      id: 2,
-      question: "Which programming paradigm emphasizes immutability and pure functions?",
-      options: ["Object-oriented", "Functional", "Procedural", "Event-driven"],
-      correctAnswer: "Functional",
-      explanation: "Functional programming is a paradigm that treats computation as the evaluation of mathematical functions and avoids changing state and mutable data.",
-      topic: "Programming Concepts"
-    },
-    {
-      id: 3,
-      question: "What is the time complexity of binary search algorithm?",
-      options: ["O(n)", "O(log n)", "O(n²)", "O(1)"],
-      correctAnswer: "O(log n)",
-      explanation: "Binary search has O(log n) time complexity because it eliminates half of the remaining elements in each iteration.",
-      topic: "Algorithms"
-    }
-  ];
+  useEffect(() => {
+    const fetchQuestions = async () => {
+      try {
+        const jobId = (location.state as ResultsState)?.jobId;
+        if (!jobId) {
+          console.error("Job ID not found");
+          return;
+        }
+
+        const response = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/jobs/${jobId}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch job status');
+        }
+        const data = await response.json();
+        
+        // Get all questions, not just the preview
+        const allQuestions = data.questions || [];
+        setQuestions(allQuestions);
+      } catch (error) {
+        console.error("Error fetching questions:", error);
+        alert("Failed to load questions. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchQuestions();
+  }, [location, navigate]);
 
   const handleDownload = (format: 'json' | 'excel') => {
-    // Simulate download
+    const jobId = (location.state as any)?.jobId;
+    if (!jobId) {
+      console.error("Job ID not found");
+      return;
+    }
+
+    // Use the questions we already have
+    const allQuestions = questions;
     const filename = `questions_${state?.filename?.replace(/\.[^/.]+$/, "") || 'generated'}.${format === 'json' ? 'json' : 'xlsx'}`;
-    console.log(`Downloading ${filename}`);
+    console.log(`Downloading ${filename} with ${allQuestions.length} questions`);
     
-    // In a real app, this would trigger an actual download
-    const blob = new Blob([JSON.stringify(sampleQuestions, null, 2)], { 
+    // Format for Excel
+    const excelData = format === 'excel' ? allQuestions.map(q => ({
+      ...q,
+      correct_answer: q.correct_answer, // No need to convert to A-D
+      options: Object.values(q.options).join(', ') // Join options for Excel
+    })) : allQuestions;
+
+    const blob = new Blob([JSON.stringify(excelData, null, 2)], { 
       type: format === 'json' ? 'application/json' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
     });
     const url = URL.createObjectURL(blob);
@@ -126,7 +148,7 @@ const Results: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-primary">
-                {state.questionsGenerated.toLocaleString()}
+                {(state?.questionsGenerated ?? questions.length).toLocaleString()}
               </div>
               <p className="text-sm text-gray-600 mt-1">
                 out of {parseInt(state.numberOfQuestions).toLocaleString()} requested
@@ -225,23 +247,23 @@ const Results: React.FC = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sampleQuestions.map((q) => (
+                  {questions.slice(0, 3).map((q) => (
                     <TableRow key={q.id}>
                       <TableCell className="font-medium">{q.id}</TableCell>
                       <TableCell>
                         <div>
                           <p className="font-medium mb-2">{q.question}</p>
                           <div className="space-y-1">
-                            {q.options.map((option, index) => (
+                            {Object.entries(q.options).map(([key, option]) => (
                               <div
-                                key={index}
+                                key={key}
                                 className={`text-sm px-2 py-1 rounded ${
-                                  option === q.correctAnswer
+                                  key === q.correct_answer
                                     ? 'bg-green-100 text-green-800 font-medium'
                                     : 'bg-gray-100 text-gray-600'
                                 }`}
                               >
-                                {String.fromCharCode(65 + index)}. {option}
+                                {`${key}: ${option}`}
                               </div>
                             ))}
                           </div>
@@ -249,7 +271,7 @@ const Results: React.FC = () => {
                       </TableCell>
                       <TableCell>
                         <Badge className="bg-green-100 text-green-800">
-                          {q.correctAnswer}
+                          {q.correct_answer}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -267,7 +289,7 @@ const Results: React.FC = () => {
             <div className="mt-4 p-4 bg-blue-50 rounded-lg">
               <p className="text-sm text-blue-800">
                 <strong>Note:</strong> This preview shows only the first 3 questions. 
-                Download the complete file to access all {state.questionsGenerated.toLocaleString()} generated questions.
+                Download the complete file to access all {(state?.questionsGenerated ?? preview.length).toLocaleString()} generated questions.
               </p>
             </div>
           </CardContent>
